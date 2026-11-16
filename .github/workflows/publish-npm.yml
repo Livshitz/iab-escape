@@ -1,0 +1,56 @@
+name: Publish to npm
+
+# Publishes @livx.cc/iab-escape to the public npm registry on push to main.
+# Idempotent: only publishes when package.json's version isn't already on npm,
+# so bumping the version in a commit is what triggers a release.
+#
+# Auth: the npm token is fetched at publish time from a scoped, read-only secrets broker.
+# The endpoint URL and its credential live in GitHub secrets (NPM_TOKEN_URL,
+# NPM_BROKER_SECRET), never in this file, so it's safe in a public repo.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org/'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Fetch npm token from secrets broker
+        env:
+          TOKEN_URL: ${{ secrets.NPM_TOKEN_URL }}
+          APP_SECRET: ${{ secrets.NPM_BROKER_SECRET }}
+        run: |
+          TOKEN=$(curl -fsS -H "x-app-secret: $APP_SECRET" "$TOKEN_URL" | jq -r '.value')
+          [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || { echo "::error::could not fetch npm token from secrets broker"; exit 1; }
+          echo "::add-mask::$TOKEN"
+          echo "NODE_AUTH_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Publish if version is new
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "$NAME@$VERSION already published, nothing to do."
+          else
+            echo "Publishing $NAME@$VERSION"
+            npm publish --access public   # prepublishOnly builds and tests first
+          fi

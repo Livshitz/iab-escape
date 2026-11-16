@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LANDED</title>
+<style>body{font:18px -apple-system,system-ui,sans-serif;margin:16px}pre{background:#f3f3f3;padding:8px;white-space:pre-wrap;word-break:break-all}</style>
+</head>
+<body>
+<h1>Landed</h1>
+<pre id="out"></pre>
+<script src="../dist/iab-escape.min.js"></script>
+<script>
+  var inApp = new IabEscape().detect().inApp;
+  document.getElementById('out').textContent =
+    'UA: ' + navigator.userAgent + '\nIN-APP: ' + (inApp ? 'yes' : 'no') + '\nQUERY: ' + location.search;
+</script>
+</body>
+</html>

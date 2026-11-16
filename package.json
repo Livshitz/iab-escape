@@ -1,0 +1,37 @@
+{
+  "name": "@livx.cc/iab-escape",
+  "version": "0.3.1",
+  "type": "module",
+  "description": "Move users from the Facebook / Instagram in-app browser to the device default browser, using only trigger methods proven on real devices.",
+  "license": "MIT",
+  "author": "Elya Livshitz",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Livshitz/iab-escape.git"
+  },
+  "homepage": "https://github.com/Livshitz/iab-escape#readme",
+  "bugs": {
+    "url": "https://github.com/Livshitz/iab-escape/issues"
+  },
+  "keywords": ["in-app-browser", "facebook", "instagram", "webview", "deep-link", "open-in-browser"],
+  "sideEffects": false,
+  "main": "./dist/IabEscape.js",
+  "module": "./dist/IabEscape.js",
+  "types": "./dist/IabEscape.d.ts",
+  "exports": {
+    ".": { "types": "./dist/IabEscape.d.ts", "import": "./dist/IabEscape.js" },
+    "./iife": "./dist/iab-escape.min.js"
+  },
+  "files": ["dist", "README.md"],
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "build": "rm -rf dist && bun build.ts && tsc -p tsconfig.build.json",
+    "test": "timeout 120 bun test",
+    "prepublishOnly": "bun run build && bun run test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.7.0"
+  }
+}

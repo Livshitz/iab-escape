@@ -1,0 +1,159 @@
+import { expect, test } from 'bun:test';
+import { IabEscape } from '../src/IabEscape';
+import { fakeWindow, UA } from './helpers';
+
+const T = 'https://example.com/p?a=1#frag';
+const IG_T = 'instagram://extbrowser/?url=https%3A%2F%2Fexample.com%2Fp%3Fa%3D1%26iab_escaped%3D1%23frag';
+const XS_T = 'x-safari-https://example.com/p?a=1&iab_escaped=1#frag';
+
+const make = (ua: string, o: any = {}) => {
+    const f = fakeWindow(ua, 'https://example.com/p');
+    let n = 0;
+    const e = new IabEscape({ window: f.win, url: T, onAttempt: () => n++, ...o });
+    return { ...f, e, count: () => n };
+};
+/** Simulate: the page goes to the background (user left), then comes back. */
+const leaveAndReturn = (f: ReturnType<typeof make>) => {
+    f.doc.visibilityState = 'hidden';
+    f.emit('visibilitychange');
+    f.doc.visibilityState = 'visible';
+    f.emit('visibilitychange');
+};
+
+test('loader: overlay appears at once, spinner state, no button yet', () => {
+    const f = make(UA.fbIos);
+    f.e.auto();
+    const o = f.overlay()!;
+    expect(o).not.toBeNull();
+    expect(o.find('ie-msg')!.textContent).toBe('Opening in your browser…');
+    expect(o.find('ie-open')!.hidden).toBe(true);
+});
+test('loader: ui is on by default; ui:false shows nothing; no rule -> no overlay', () => {
+    const d = make(UA.fbIos);
+    d.e.auto();
+    expect(d.overlay()).not.toBeNull();
+    const a = make(UA.fbIos, { ui: false });
+    a.e.auto();
+    a.advance(5000);
+    expect(a.overlay()).toBeNull();
+    const b = make(UA.safari);
+    b.e.auto();
+    expect(b.overlay()).toBeNull();
+});
+test('loader: cancel before the fire removes the overlay', () => {
+    const f = make(UA.fbIos);
+    f.e.auto()();
+    expect(f.overlay()).toBeNull();
+});
+test('loader: after the fire the button appears with the scheme URL; labels overridable', () => {
+    const f = make(UA.fbIos, { labels: { open: 'Go' } });
+    f.e.auto();
+    f.advance(1500);
+    expect(f.win.location.href).toBe(XS_T);
+    f.advance(799);
+    expect(f.overlay()!.find('ie-open')!.hidden).toBe(true);
+    f.advance(1);
+    const btn = f.overlay()!.find('ie-open')!;
+    expect(btn.hidden).toBe(false);
+    expect(btn.href).toBe(XS_T);
+    expect(btn.textContent).toBe('Go');
+    expect(f.overlay()!.find('ie-stay')!.hidden).toBe(false);
+});
+test('loader: "Continue here" removes the overlay and stops re-fires', () => {
+    const f = make(UA.igIos);
+    f.e.auto();
+    f.advance(800);
+    f.overlay()!.find('ie-stay')!.click();
+    expect(f.overlay()).toBeNull();
+    leaveAndReturn(f);
+    expect(f.count()).toBe(1);
+    expect(f.overlay()).toBeNull();
+});
+
+test('re-entry: left then visible fires once more and shows the loader again', () => {
+    const f = make(UA.igIos);
+    f.e.auto();
+    f.advance(800);
+    expect(f.count()).toBe(1);
+    leaveAndReturn(f);
+    expect(f.count()).toBe(2);
+    expect(f.overlay()!.find('ie-open')!.hidden).toBe(true);
+});
+test('re-entry: a persisted pageshow alone re-fires; non-persisted does not', () => {
+    const f = make(UA.igIos);
+    f.e.auto();
+    f.emit('pageshow', { persisted: false });
+    expect(f.count()).toBe(1);
+    f.emit('pageshow', { persisted: true });
+    expect(f.count()).toBe(2);
+});
+test('re-entry: pageshow + visibilitychange of ONE return fire once; delay respected', () => {
+    const f = make(UA.fbIos);
+    f.e.auto();
+    f.advance(1500);
+    expect(f.count()).toBe(1);
+    f.doc.visibilityState = 'hidden';
+    f.emit('pagehide');
+    f.emit('visibilitychange');
+    f.doc.visibilityState = 'visible';
+    f.emit('pageshow', { persisted: true });
+    f.emit('visibilitychange');
+    expect(f.count()).toBe(1);
+    f.advance(1500);
+    expect(f.count()).toBe(2);
+});
+test('cancel path: page never hidden -> visibility changes do not re-fire; button stays', () => {
+    const f = make(UA.igIos);
+    f.e.auto();
+    f.advance(800);
+    f.emit('visibilitychange');
+    f.emit('visibilitychange');
+    f.advance(5000);
+    expect(f.count()).toBe(1);
+    expect(f.overlay()!.find('ie-open')!.hidden).toBe(false);
+});
+test('maxAutoFires caps automatic fires per page lifetime and keeps the button', () => {
+    const f = make(UA.igIos, { maxAutoFires: 2 });
+    f.e.auto();
+    leaveAndReturn(f);
+    expect(f.count()).toBe(2);
+    f.advance(1000);
+    leaveAndReturn(f);
+    f.advance(5000);
+    expect(f.count()).toBe(2);
+    const btn = f.overlay()!.find('ie-open')!;
+    expect(btn.hidden).toBe(false);
+    expect(btn.href).toBe(IG_T);
+});
+
+test('theme option sets the --iab-* CSS variables inline; none -> no inline style', () => {
+    const f = make(UA.fbIos, { theme: { accent: '#e33', bg: '#000', radius: '4px' } });
+    f.e.auto();
+    expect(f.overlay()!.attrs.style).toBe('--iab-bg:#000;--iab-accent:#e33;--iab-radius:4px');
+    const g = make(UA.fbIos);
+    g.e.auto();
+    expect(g.overlay()!.attrs.style).toBeUndefined();
+});
+test('onState sequence: opening -> fallback (with the scheme URL), also with the built-in UI on', () => {
+    const seen: any[] = [];
+    const f = make(UA.igIos, { onState: (s: any) => seen.push(s) });
+    f.e.auto();
+    f.advance(800);
+    expect(seen).toEqual([{ phase: 'opening', url: IG_T }, { phase: 'fallback', url: IG_T }]);
+});
+test('onState with ui:false: no overlay, custom UI gets reentry; dismiss() stops re-fire', () => {
+    const phases: string[] = [];
+    const f = make(UA.igIos, { ui: false, onState: (s: any) => phases.push(s.phase) });
+    f.e.auto();
+    f.advance(800);
+    leaveAndReturn(f);
+    expect(f.overlay()).toBeNull();
+    expect(phases).toEqual(['opening', 'fallback', 'reentry']);
+    expect(f.count()).toBe(2);
+    f.advance(1000);
+    f.e.dismiss();
+    leaveAndReturn(f);
+    f.advance(5000);
+    expect(phases).toEqual(['opening', 'fallback', 'reentry', 'fallback', 'dismissed']);
+    expect(f.count()).toBe(2);
+});
