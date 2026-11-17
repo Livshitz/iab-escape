@@ -157,3 +157,85 @@ test('onState with ui:false: no overlay, custom UI gets reentry; dismiss() stops
     expect(phases).toEqual(['opening', 'fallback', 'reentry', 'fallback', 'dismissed']);
     expect(f.count()).toBe(2);
 });
+
+const DEST = 'https://dest.example/x?y=1';
+test('continue: navigates the webview to continueUrl; "Continue here" button does the same', () => {
+    const f = make(UA.igIos, { continueUrl: DEST });
+    f.e.auto();
+    f.advance(800);
+    f.overlay()!.find('ie-stay')!.click();
+    expect(f.overlay()).toBeNull();
+    expect(f.win.location.href).toBe(DEST);
+});
+test('continue: defaults to the target url; relative continueUrl resolves', () => {
+    const a = make(UA.igIos);
+    a.e.auto();
+    a.e.continue();
+    expect(a.win.location.href).toBe(T);
+    const b = make(UA.igIos, { continueUrl: '/landing' });
+    b.e.auto();
+    b.e.continue();
+    expect(b.win.location.href).toBe('https://example.com/landing');
+});
+test('continue: no url given -> only dismisses', () => {
+    const f = fakeWindow(UA.igIos, 'https://example.com/p');
+    const e = new IabEscape({ window: f.win });
+    e.auto();
+    const after = f.win.location.href;
+    e.continue();
+    expect(f.overlay()).toBeNull();
+    expect(f.win.location.href).toBe(after);
+});
+test('fallback manual (default): never navigates by itself', () => {
+    const f = make(UA.igIos, { continueUrl: DEST });
+    f.e.auto();
+    f.advance(30000);
+    expect(f.win.location.href).toBe(IG_T);
+});
+test('fallback auto: navigates once after fallbackMs when visible and focused, no re-fire after', () => {
+    const f = make(UA.igIos, { fallback: 'auto', continueUrl: DEST });
+    f.e.auto();
+    f.advance(2499);
+    expect(f.win.location.href).toBe(IG_T);
+    f.advance(1);
+    expect(f.win.location.href).toBe(DEST);
+    f.win.location.href = 'reset';
+    f.advance(30000);
+    leaveAndReturn(f);
+    f.advance(5000);
+    expect(f.win.location.href).toBe('reset');
+    expect(f.count()).toBe(1);
+});
+test('fallback auto: waits while the page is unfocused (native dialog), continues when focus returns', () => {
+    const f = make(UA.igIos, { fallback: 'auto', continueUrl: DEST });
+    f.e.auto();
+    f.doc.focused = false;
+    f.advance(2500);
+    f.advance(5000);
+    expect(f.win.location.href).toBe(IG_T);
+    f.doc.focused = true;
+    f.advance(500);
+    expect(f.win.location.href).toBe(DEST);
+});
+test('fallback auto: gives up after fallbackMaxMs while unfocused', () => {
+    const f = make(UA.igIos, { fallback: 'auto', continueUrl: DEST, fallbackMaxMs: 4000 });
+    f.e.auto();
+    f.doc.focused = false;
+    f.advance(10000);
+    f.doc.focused = true;
+    f.advance(5000);
+    expect(f.win.location.href).toBe(IG_T);
+});
+test('fallback auto: does not navigate if the page went hidden/pagehide', () => {
+    const f = make(UA.igIos, { fallback: 'auto', continueUrl: DEST });
+    f.e.auto();
+    f.doc.visibilityState = 'hidden';
+    f.emit('visibilitychange');
+    f.advance(10000);
+    expect(f.win.location.href).toBe(IG_T);
+    const g = make(UA.igIos, { fallback: 'auto', continueUrl: DEST });
+    g.e.auto();
+    g.emit('pagehide');
+    g.advance(10000);
+    expect(g.win.location.href).toBe(IG_T);
+});

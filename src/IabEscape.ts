@@ -32,6 +32,14 @@ export class IabEscapeOptions {
     theme: Theme = {};
     /** Phase callback for a custom UI (also called when the built-in UI is on). */
     onState: ((state: State) => void) | null = null;
+    /** Where "Continue here" (and the auto fallback) navigates the webview. Default: `url`; none -> just dismiss. */
+    continueUrl: string | null = null;
+    /** 'auto': if the page did not go away after the fire, continue in the webview by itself. Device-unverified. */
+    fallback: 'manual' | 'auto' = 'manual';
+    /** 'auto' only: wait this long after the fire before the first check. */
+    fallbackMs = 2500;
+    /** 'auto' only: stop re-checking (every 500 ms while the page is unfocused or hidden) this long after the fire. */
+    fallbackMaxMs = 15000;
     /** Max automatic fires per page lifetime (the first fire + re-entry re-fires). */
     maxAutoFires = 3;
     /** Injectable for tests. Default: globalThis.window. */
@@ -46,6 +54,10 @@ export function optionsFromDataset(d: Record<string, string | undefined>): Parti
     if (d.markParam !== undefined) o.markParam = d.markParam === '' ? null : d.markParam;
     if (d.includeUnproven !== undefined) o.includeUnproven = true;
     if (d.url) o.url = d.url;
+    if (d.continueUrl) o.continueUrl = d.continueUrl;
+    if (d.fallback === 'auto' || d.fallback === 'manual') o.fallback = d.fallback;
+    const fm = d.fallbackMs?.trim();
+    if (fm && Number.isFinite(Number(fm)) && Number(fm) >= 0) o.fallbackMs = Number(fm);
     if (d.ui !== undefined) o.ui = d.ui !== 'false';
     const theme: Theme = {};
     if (d.accent) theme.accent = d.accent;
@@ -63,6 +75,7 @@ export function optionsFromDataset(d: Record<string, string | undefined>): Parti
 const WATCH_MS = 3000;
 const REVEAL_MS = 800;
 const REENTER_LOCK_MS = 1000;
+const AUTO_RECHECK_MS = 500;
 const FIRED = '__iabEscapeFired';
 
 const hasParam = (url: string, key: string) =>
@@ -80,6 +93,8 @@ export class IabEscape {
     private wentAway = false;
     private locked = false;
     private dismissed = false;
+    private fallbackSeq = 0;
+    private base = '';
 
     public constructor(public options?: Partial<IabEscapeOptions>) {
         this.options = { ...new IabEscapeOptions(), ...options };
@@ -104,9 +119,12 @@ export class IabEscape {
         return rule && target ? rule.build(target) : null;
     }
 
+    /** The page URL, captured before the first navigation (relative urls must not resolve against a scheme URL). */
+    private pageUrl(): string { return (this.base ||= this.win.location.href); }
+
     /** Resolves the target (relative `url` against the current location); the query is never re-serialized. */
     private target(): Target | null {
-        const base = this.win.location.href;
+        const base = this.pageUrl();
         const input = this.o.url ?? base;
         let resolved: URL;
         try { resolved = new URL(input, base); } catch { return null; }
@@ -171,7 +189,7 @@ export class IabEscape {
     }
 
     private loader(): Loader {
-        return (this.ldr ??= new Loader(this.win.document, { ...DEFAULT_LABELS, ...this.o.labels }, this.o.theme, () => this.dismiss()));
+        return (this.ldr ??= new Loader(this.win.document, { ...DEFAULT_LABELS, ...this.o.labels }, this.o.theme, () => this.continue()));
     }
 
     private state(phase: State['phase']): void {
@@ -183,6 +201,40 @@ export class IabEscape {
         this.dismissed = true;
         this.ldr?.hide();
         this.state('dismissed');
+    }
+
+    /** "Continue here": dismiss, then navigate the current webview to the destination (if there is one). */
+    public continue(): void {
+        this.dismiss();
+        const to = this.continueTarget();
+        if (to) this.win.location.href = to;
+    }
+
+    private continueTarget(): string | null {
+        const input = this.o.continueUrl ?? this.o.url;
+        if (!input) return null;
+        try {
+            const u = new URL(input, this.pageUrl());
+            return /^https?:$/.test(u.protocol) ? (/^https?:\/\//i.test(input) ? input : u.href) : null;
+        } catch { return null; }
+    }
+
+    /**
+     * 'auto' fallback: if the page is still here after the fire, continue in the webview. A native confirm may leave
+     * the page 'visible' with timers running, so only continue when it is visible AND focused; else re-check.
+     */
+    private armAutoFallback(): void {
+        const { win } = this;
+        const doc = win.document;
+        const seq = ++this.fallbackSeq;
+        let waited = this.o.fallbackMs;
+        const check = () => {
+            if (seq !== this.fallbackSeq || this.dismissed || this.wentAway) return;
+            if (doc.visibilityState === 'visible' && (doc.hasFocus?.() ?? true)) return this.continue();
+            waited += AUTO_RECHECK_MS;
+            if (waited <= this.o.fallbackMaxMs) win.setTimeout(check, AUTO_RECHECK_MS);
+        };
+        win.setTimeout(check, this.o.fallbackMs);
     }
 
     private fallback(): void {
@@ -199,6 +251,7 @@ export class IabEscape {
         this.fires++;
         this.watchReentry();
         this.win.setTimeout(() => { if (!this.dismissed) this.fallback(); }, REVEAL_MS);
+        if (this.o.fallback === 'auto') this.armAutoFallback();
         return true;
     }
 

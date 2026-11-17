@@ -45,7 +45,7 @@ export function fakeWindow(ua: string, href = 'https://example.com/p?a=1#frag') 
     const rem = (n: string, f: Fn) => { listeners[n] = (listeners[n] ?? []).filter((x) => x !== f); };
     const body = new FakeEl('body');
     const doc = {
-        visibilityState: 'visible', readyState: 'complete', body, addEventListener: add, removeEventListener: rem,
+        visibilityState: 'visible', readyState: 'complete', focused: true, hasFocus() { return this.focused; }, body, addEventListener: add, removeEventListener: rem,
         createElement: (t: string) => new FakeEl(t),
     };
     const win: any = {
@@ -55,8 +55,15 @@ export function fakeWindow(ua: string, href = 'https://example.com/p?a=1#frag') 
         clearTimeout: (id: number) => { timers.delete(id); },
     };
     const advance = (ms: number) => {
-        now += ms;
-        for (const [id, t] of [...timers]) if (t.at <= now) { timers.delete(id); t.fn(); }
+        const end = now + ms;
+        for (;;) {
+            const due = [...timers].filter(([, t]) => t.at <= end).sort((a, b) => a[1].at - b[1].at)[0];
+            if (!due) break;
+            now = due[1].at;
+            timers.delete(due[0]);
+            due[1].fn();
+        }
+        now = end;
     };
     const emit = (n: string, ev?: any) => (listeners[n] ?? []).forEach((f) => f(ev));
     /** The overlay root, or null. */

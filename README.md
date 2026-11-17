@@ -108,6 +108,12 @@ myUi.onContinue(() => esc.dismiss());
 
 2026-11-16, organic links: iOS 26.7.3 with Facebook 587 and Instagram 455, and Android 16 with Facebook 587. Each combination passed 3/3 for calls on load and for late calls (SPA-style, 0.8 s after load).
 
+## Declined the prompt
+
+"Continue here" navigates the webview to the destination (`continueUrl` / `data-continue-url`, default: the `url` / `data-url` target; with no url it only removes the overlay). A custom UI calls `esc.continue()`.
+
+`fallback: 'auto'` (`data-fallback="auto"`, default `'manual'`) continues by itself when the page is still here `fallbackMs` (default 2500) after the fire. A native confirm may leave the page visible with timers running, so it only continues when `document.visibilityState` is `visible` and `document.hasFocus()` is true, re-checking every 500 ms up to `fallbackMaxMs` (15000). This focus check is device-unverified. No re-fire happens after it navigates.
+
 ## Limits
 
 - The schemes are undocumented by Meta and an app update can break them: keep a fallback link and monitor.

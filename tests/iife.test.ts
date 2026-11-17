@@ -42,3 +42,8 @@ test('optionsFromDataset: theme and labels', () => {
     expect(optionsFromDataset({ labelOpening: 'A', labelOpen: 'B', labelStay: 'C' })).toEqual({ labels: { opening: 'A', open: 'B', stay: 'C' } });
     expect(optionsFromDataset({ accent: '' })).toEqual({});
 });
+
+test('optionsFromDataset: continue url and fallback', () => {
+    expect(optionsFromDataset({ continueUrl: 'https://a.io/x', fallback: 'auto', fallbackMs: '3000' })).toEqual({ continueUrl: 'https://a.io/x', fallback: 'auto', fallbackMs: 3000 });
+    expect(optionsFromDataset({ fallback: 'bogus', fallbackMs: 'x' })).toEqual({});
+});
