@@ -35,11 +35,15 @@ export class IabEscapeOptions {
     /** Where "Continue here" (and the auto fallback) navigates the webview. Default: `url`; none -> just dismiss. */
     continueUrl: string | null = null;
     /** 'auto': if the page did not go away after the fire, continue in the webview by itself. Device-unverified. */
-    fallback: 'manual' | 'auto' | 'parallel' = 'manual';
+    fallback: 'manual' | 'auto' | 'parallel' | 'retry' = 'manual';
     /** 'auto' only: wait this long after the fire before the first check. */
     fallbackMs = 2500;
     /** 'parallel' only: navigate to the destination this long after the scheme fires, whatever the confirm answer. */
     parallelDelayMs = 0;
+    /** 'retry' (experimental): re-issue the destination navigation this often, until unload or 15 s. */
+    retryMs = 400;
+    /** Called for every navigation to the destination the lib issues (diagnostics). */
+    onContinue: ((url: string, reason: string) => void) | null = null;
     /** 'auto' only: stop re-checking (every 500 ms while the page is unfocused or hidden) this long after the fire. */
     fallbackMaxMs = 15000;
     /** Max automatic fires per page lifetime (the first fire + re-entry re-fires). */
@@ -57,7 +61,9 @@ export function optionsFromDataset(d: Record<string, string | undefined>): Parti
     if (d.includeUnproven !== undefined) o.includeUnproven = true;
     if (d.url) o.url = d.url;
     if (d.continueUrl) o.continueUrl = d.continueUrl;
-    if (d.fallback === 'auto' || d.fallback === 'manual' || d.fallback === 'parallel') o.fallback = d.fallback;
+    if (d.fallback === 'auto' || d.fallback === 'manual' || d.fallback === 'parallel' || d.fallback === 'retry') o.fallback = d.fallback;
+    const rm = d.retryMs?.trim();
+    if (rm && Number.isFinite(Number(rm)) && Number(rm) > 0) o.retryMs = Number(rm);
     const pd = d.parallelDelayMs?.trim();
     if (pd && Number.isFinite(Number(pd)) && Number(pd) >= 0) o.parallelDelayMs = Number(pd);
     const fm = d.fallbackMs?.trim();
@@ -83,6 +89,7 @@ const REENTER_LOCK_MS = 1000;
 const AUTO_RECHECK_MS = 150;
 const DEBOUNCE_MS = 300;
 const SAFETY_MS = 4000;
+const RETRY_MAX_MS = 15000;
 const FIRED = '__iabEscapeFired';
 
 const hasParam = (url: string, key: string) =>
@@ -215,17 +222,18 @@ export class IabEscape {
     public continue(): void {
         const to = this.continueTarget();
         if (!to) return this.dismiss();
-        this.go(to);
+        this.go(to, 'tap');
     }
 
     /** Navigates the webview. The overlay stays until the page unloads: no bare host page in between. */
-    private go(to: string): void {
+    private go(to: string, reason: string): void {
         if (!this.continuing) {
             this.continuing = true;
             this.dismissed = true; // stops scheme re-fires
             if (this.o.ui) this.loader().continuing();
             this.state('continuing');
         }
+        this.o.onContinue?.(to, reason);
         this.win.location.href = to;
     }
 
@@ -245,7 +253,7 @@ export class IabEscape {
      * plus one safety retry at SAFETY_MS ('parallel'). All retries stop on pagehide; none while a beforeunload
      * says a navigation is in flight. 'auto' also polls every AUTO_RECHECK_MS as a backstop.
      */
-    private armContinue(mode: 'parallel' | 'auto'): void {
+    private armContinue(mode: 'parallel' | 'auto' | 'retry'): void {
         const to = this.continueTarget();
         if (this.contArmed || !to) return;
         this.contArmed = true;
@@ -254,30 +262,41 @@ export class IabEscape {
         const focused = () => doc.visibilityState === 'visible' && (doc.hasFocus?.() ?? true);
         let started = false, gone = false, flight = false, quiet = false;
         const stopped = () => gone || flight || (this.dismissed && !this.continuing);
-        const go = () => { started = true; this.go(to); };
-        const retry = () => {
+        const go = (reason: string) => { started = true; this.go(to, reason); };
+        const retry = (reason: string) => {
             if (stopped() || quiet || (mode === 'parallel' && !started)) return;
             if (mode === 'auto' && (this.wentAway || !focused())) return;
             quiet = true;
             win.setTimeout(() => { quiet = false; }, DEBOUNCE_MS);
-            go();
+            go(reason);
         };
-        win.addEventListener('focus', retry);
-        win.addEventListener('pageshow', retry);
-        doc.addEventListener('visibilitychange', () => { if (doc.visibilityState === 'visible') retry(); });
-        doc.addEventListener('pointerdown', retry, true);
-        doc.addEventListener('touchstart', retry, true);
         win.addEventListener('pagehide', () => { gone = true; });
         win.addEventListener('beforeunload', () => { flight = true; });
+        if (mode === 'retry') {
+            let elapsed = 0;
+            const tick = () => {
+                if (stopped() || elapsed > RETRY_MAX_MS) return;
+                go('retry');
+                elapsed += this.o.retryMs;
+                win.setTimeout(tick, this.o.retryMs);
+            };
+            tick();
+            return;
+        }
+        win.addEventListener('focus', () => retry('focus'));
+        win.addEventListener('pageshow', () => retry('pageshow'));
+        doc.addEventListener('visibilitychange', () => { if (doc.visibilityState === 'visible') retry('visible'); });
+        doc.addEventListener('pointerdown', () => retry('pointerdown'), true);
+        doc.addEventListener('touchstart', () => retry('touchstart'), true);
         if (mode === 'parallel') {
-            win.setTimeout(() => { if (!stopped()) go(); }, this.o.parallelDelayMs);
-            win.setTimeout(() => { if (started && !stopped()) go(); }, SAFETY_MS);
+            win.setTimeout(() => { if (!stopped()) go('parallel'); }, this.o.parallelDelayMs);
+            win.setTimeout(() => { if (started && !stopped()) go('safety'); }, SAFETY_MS);
             return;
         }
         let waited = this.o.fallbackMs;
         const check = () => {
             if (stopped() || started || this.wentAway) return;
-            if (focused()) return go();
+            if (focused()) return go('poll');
             waited += AUTO_RECHECK_MS;
             if (waited <= this.o.fallbackMaxMs) win.setTimeout(check, AUTO_RECHECK_MS);
         };
@@ -298,7 +317,7 @@ export class IabEscape {
         this.fires++;
         this.watchReentry();
         this.win.setTimeout(() => { if (!this.dismissed) this.fallback(); }, REVEAL_MS);
-        if (this.o.fallback === 'auto' || this.o.fallback === 'parallel') this.armContinue(this.o.fallback);
+        if (this.o.fallback === 'auto' || this.o.fallback === 'parallel' || this.o.fallback === 'retry') this.armContinue(this.o.fallback);
         return true;
     }
 

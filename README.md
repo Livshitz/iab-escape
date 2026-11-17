@@ -117,6 +117,8 @@ myUi.onContinue(() => esc.dismiss());
 - `'parallel'` (**recommended**): fires the scheme and navigates to the destination `parallelDelayMs` (`data-parallel-delay-ms`, default 0) later. A navigation issued while the app's native prompt is open can be dropped (seen on Facebook iOS), so it is re-issued when the user is back on the page: on `focus`, `visibilitychange` to visible, `pageshow`, or any `pointerdown`/`touchstart` (one per ~300 ms burst), plus one safety retry 4 s after the fire. Retries stop on `pagehide` and while a `beforeunload` says a navigation is in flight.
 - `'auto'`: continues once the page is visible AND focused (`document.hasFocus()`), triggered by the same events and by a 150 ms poll starting `fallbackMs` (default 2500) after the fire, up to `fallbackMaxMs` (15000).
 
+- `'retry'` (experimental): re-issues the destination navigation every `retryMs` (`data-retry-ms`, default 400) until `pagehide`/`beforeunload` or 15 s. `onContinue(url, reason)` reports every navigation the lib issues (diagnostics).
+
 No re-fire happens after either navigates.
 
 ## Limits

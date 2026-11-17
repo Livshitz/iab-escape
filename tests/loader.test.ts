@@ -385,3 +385,58 @@ test('auto: focus/pointer event navigates early when focused; not when unfocused
     b.emit('focus');
     expect(b.win.location.href).toBe(IG_T);
 });
+
+// --- retry (experimental) + onContinue ---
+const retryEnv = (o: any = {}) => {
+    const seen: string[] = [];
+    const f = make(UA.igIos, { fallback: 'retry', continueUrl: DEST, onContinue: (u: string, r: string) => seen.push(r), ...o });
+    return { ...f, seen };
+};
+test('retry: navigates at once, then every retryMs (default 400)', () => {
+    const f = retryEnv();
+    f.e.auto();
+    expect(f.win.location.href).toBe(DEST);
+    expect(f.seen).toEqual(['retry']);
+    f.win.location.href = 'dropped';
+    f.advance(399);
+    expect(f.win.location.href).toBe('dropped');
+    f.advance(1);
+    expect(f.win.location.href).toBe(DEST);
+    expect(f.seen).toEqual(['retry', 'retry']);
+});
+test('retry: custom retryMs; stops on pagehide', () => {
+    const f = retryEnv({ retryMs: 100 });
+    f.e.auto();
+    f.advance(250);
+    expect(f.seen.length).toBe(3);
+    f.emit('pagehide');
+    f.advance(5000);
+    expect(f.seen.length).toBe(3);
+});
+test('retry: stops on beforeunload', () => {
+    const f = retryEnv();
+    f.e.auto();
+    f.emit('beforeunload');
+    f.advance(5000);
+    expect(f.seen.length).toBe(1);
+});
+test('retry: stops after 15 s', () => {
+    const f = retryEnv();
+    f.e.auto();
+    f.advance(60000);
+    const n = f.seen.length;
+    expect(n).toBeGreaterThan(30);
+    expect(n).toBeLessThanOrEqual(40);
+    f.advance(60000);
+    expect(f.seen.length).toBe(n);
+});
+test('onContinue reports the reason for each navigation (parallel, tap)', () => {
+    const seen: string[] = [];
+    const f = make(UA.igIos, { fallback: 'parallel', continueUrl: DEST, onContinue: (_u: string, r: string) => seen.push(r) });
+    f.e.auto();
+    f.advance(0);
+    f.emit('focus');
+    f.advance(4000);
+    f.e.continue();
+    expect(seen).toEqual(['parallel', 'focus', 'safety', 'tap']);
+});

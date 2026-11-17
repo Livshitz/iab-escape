@@ -52,3 +52,8 @@ test('optionsFromDataset: parallel fallback, delay and continuing label', () => 
     expect(optionsFromDataset({ fallback: 'parallel', parallelDelayMs: '1000', labelContinuing: 'Go' })).toEqual({ fallback: 'parallel', parallelDelayMs: 1000, labels: { continuing: 'Go' } });
     expect(optionsFromDataset({ parallelDelayMs: '-1' })).toEqual({});
 });
+
+test('optionsFromDataset: retry fallback and retry-ms', () => {
+    expect(optionsFromDataset({ fallback: 'retry', retryMs: '250' })).toEqual({ fallback: 'retry', retryMs: 250 });
+    expect(optionsFromDataset({ retryMs: '0' })).toEqual({});
+});
