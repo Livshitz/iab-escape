@@ -41,7 +41,7 @@ export class IabEscapeOptions {
     /** 'parallel' only: navigate to the destination this long after the scheme fires, whatever the confirm answer. */
     parallelDelayMs = 0;
     /** 'retry' (experimental): re-issue the destination navigation this often, until unload or 15 s. */
-    retryMs = 400;
+    retryMs = 300;
     /** Called for every navigation to the destination the lib issues (diagnostics). */
     onContinue: ((url: string, reason: string) => void) | null = null;
     /** 'auto' only: stop re-checking (every 500 ms while the page is unfocused or hidden) this long after the fire. */
@@ -88,7 +88,6 @@ const REVEAL_MS = 800;
 const REENTER_LOCK_MS = 1000;
 const AUTO_RECHECK_MS = 150;
 const DEBOUNCE_MS = 300;
-const SAFETY_MS = 4000;
 const RETRY_MAX_MS = 15000;
 const FIRED = '__iabEscapeFired';
 
@@ -247,16 +246,16 @@ export class IabEscape {
     }
 
     /**
-     * Continue in the webview after the scheme fired ('parallel': at once / after parallelDelayMs; 'auto': once the
-     * page is visible AND focused). A location.href issued while the app's native prompt is open is dropped, so the
-     * navigation is re-issued when the user is back on the page (focus, visible, pageshow, pointer/touch; debounced),
-     * plus one safety retry at SAFETY_MS ('parallel'). All retries stop on pagehide; none while a beforeunload
-     * says a navigation is in flight. 'auto' also polls every AUTO_RECHECK_MS as a backstop.
+     * Continue in the webview AFTER the scheme fired (armed from fireNow only). 'retry'/'parallel': a loop re-issuing
+     * the navigation every retryMs (first at fire + retryMs / parallelDelayMs) until pagehide, beforeunload or 15 s;
+     * the app's native prompt swallows navigations while open and no browser event reports it closing. 'auto': once
+     * the page is visible AND focused (events + a 150 ms poll starting at fallbackMs).
      */
     private armContinue(mode: 'parallel' | 'auto' | 'retry'): void {
         const to = this.continueTarget();
         if (this.contArmed || !to) return;
         this.contArmed = true;
+        const first = mode === 'parallel' ? this.o.parallelDelayMs : this.o.retryMs;
         const { win } = this;
         const doc = win.document;
         const focused = () => doc.visibilityState === 'visible' && (doc.hasFocus?.() ?? true);
@@ -264,23 +263,24 @@ export class IabEscape {
         const stopped = () => gone || flight || (this.dismissed && !this.continuing);
         const go = (reason: string) => { started = true; this.go(to, reason); };
         const retry = (reason: string) => {
-            if (stopped() || quiet || (mode === 'parallel' && !started)) return;
-            if (mode === 'auto' && (this.wentAway || !focused())) return;
+            if (stopped() || quiet || this.wentAway || !focused()) return;
             quiet = true;
             win.setTimeout(() => { quiet = false; }, DEBOUNCE_MS);
             go(reason);
         };
         win.addEventListener('pagehide', () => { gone = true; });
         win.addEventListener('beforeunload', () => { flight = true; });
-        if (mode === 'retry') {
-            let elapsed = 0;
+        if (mode !== 'auto') {
+            // One retry loop for 'retry' and 'parallel'. Only ever armed after the scheme fired (fireNow), and the
+            // app's prompt swallows navigations while open (no browser event reports it closing), so just keep trying.
+            let elapsed = first;
             const tick = () => {
                 if (stopped() || elapsed > RETRY_MAX_MS) return;
-                go('retry');
+                go(mode);
                 elapsed += this.o.retryMs;
                 win.setTimeout(tick, this.o.retryMs);
             };
-            tick();
+            win.setTimeout(tick, first);
             return;
         }
         win.addEventListener('focus', () => retry('focus'));
@@ -288,11 +288,6 @@ export class IabEscape {
         doc.addEventListener('visibilitychange', () => { if (doc.visibilityState === 'visible') retry('visible'); });
         doc.addEventListener('pointerdown', () => retry('pointerdown'), true);
         doc.addEventListener('touchstart', () => retry('touchstart'), true);
-        if (mode === 'parallel') {
-            win.setTimeout(() => { if (!stopped()) go('parallel'); }, this.o.parallelDelayMs);
-            win.setTimeout(() => { if (started && !stopped()) go('safety'); }, SAFETY_MS);
-            return;
-        }
         let waited = this.o.fallbackMs;
         const check = () => {
             if (stopped() || started || this.wentAway) return;

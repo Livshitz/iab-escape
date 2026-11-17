@@ -269,17 +269,16 @@ test('custom continuing label; onState gets continuing', () => {
     expect(f.overlay()!.find('ie-msg')!.textContent).toBe('Hold on');
     expect(phases.at(-1)).toBe('continuing');
 });
-test('parallel: navigates to the destination right after the scheme (delay 0), once, no re-fire', () => {
+test('parallel: navigates to the destination right after the scheme (delay 0), once re-fire-free', () => {
     const f = make(UA.igIos, { fallback: 'parallel', continueUrl: DEST });
     f.e.auto();
-    expect(f.win.location.href).toBe(IG_T);
+    expect(f.win.location.href).toBe(IG_T); // scheme first, destination only after
     f.advance(0);
     expect(f.win.location.href).toBe(DEST);
     expect(f.count()).toBe(1);
     f.win.location.href = 'reset';
-    leaveAndReturn(f); // user is back: the navigation is re-issued, the scheme is NOT re-fired
-    expect(f.win.location.href).toBe(DEST);
-    expect(f.count()).toBe(1);
+    leaveAndReturn(f);
+    expect(f.count()).toBe(1); // no scheme re-fire after a continue
     expect(f.overlay()!.find('ie-msg')!.textContent).toBe('Opening…');
 });
 test('parallel: parallelDelayMs delays the destination navigation; ignores focus/visibility', () => {
@@ -299,73 +298,6 @@ test('parallel: no destination -> no navigation (loader stays in fallback)', () 
     expect(w.win.location.href).toBe('instagram://extbrowser/?url=https%3A%2F%2Fexample.com%2Fp%3Fiab_escaped%3D1');
 });
 
-// --- parallel / auto: event-driven re-navigation ---
-const parallel = (o: any = {}) => {
-    const f = make(UA.igIos, { fallback: 'parallel', continueUrl: DEST, ...o });
-    f.e.auto();
-    f.advance(0);
-    expect(f.win.location.href).toBe(DEST);
-    f.win.location.href = 'dropped'; // the app's prompt swallowed the navigation
-    return f;
-};
-for (const [name, trigger] of [
-    ['focus', (f: any) => f.emit('focus')],
-    ['visibilitychange -> visible', (f: any) => f.emit('visibilitychange')],
-    ['pageshow', (f: any) => f.emit('pageshow', { persisted: false })],
-    ['pointerdown', (f: any) => f.emit('pointerdown')],
-    ['touchstart', (f: any) => f.emit('touchstart')],
-] as const) {
-    test(`parallel: dropped first navigation is retried on ${name}`, () => {
-        const f = parallel();
-        trigger(f);
-        expect(f.win.location.href).toBe(DEST);
-    });
-}
-test('parallel: no retry before the first (delayed) navigation', () => {
-    const f = make(UA.igIos, { fallback: 'parallel', parallelDelayMs: 1000, continueUrl: DEST });
-    f.e.auto();
-    f.emit('focus');
-    f.emit('pointerdown');
-    expect(f.win.location.href).toBe(IG_T);
-    f.advance(1000);
-    expect(f.win.location.href).toBe(DEST);
-});
-test('parallel: no retry after pagehide', () => {
-    const f = parallel();
-    f.emit('pagehide');
-    f.emit('focus');
-    f.advance(10000);
-    expect(f.win.location.href).toBe('dropped');
-});
-test('parallel: no retry while a navigation is in flight (beforeunload)', () => {
-    const f = parallel();
-    f.emit('beforeunload');
-    f.emit('focus');
-    f.advance(10000);
-    expect(f.win.location.href).toBe('dropped');
-});
-test('parallel: events within 300 ms are one burst; a later one retries again', () => {
-    const f = parallel();
-    f.emit('focus');
-    expect(f.win.location.href).toBe(DEST);
-    f.win.location.href = 'dropped2';
-    f.advance(100);
-    f.emit('pointerdown');
-    expect(f.win.location.href).toBe('dropped2');
-    f.advance(200);
-    f.emit('touchstart');
-    expect(f.win.location.href).toBe(DEST);
-});
-test('parallel: one safety retry at 4 s after the fire, only once', () => {
-    const f = parallel();
-    f.advance(3999);
-    expect(f.win.location.href).toBe('dropped');
-    f.advance(1);
-    expect(f.win.location.href).toBe(DEST);
-    f.win.location.href = 'dropped2';
-    f.advance(30000);
-    expect(f.win.location.href).toBe('dropped2');
-});
 test('auto: focus/pointer event navigates early when focused; not when unfocused or the page left', () => {
     const a = make(UA.igIos, { fallback: 'auto', continueUrl: DEST });
     a.e.auto();
@@ -386,57 +318,78 @@ test('auto: focus/pointer event navigates early when focused; not when unfocused
     expect(b.win.location.href).toBe(IG_T);
 });
 
-// --- retry (experimental) + onContinue ---
-const retryEnv = (o: any = {}) => {
+// --- retry loop ('retry' and 'parallel' share it) ---
+const loop = (o: any = {}, ua = UA.igIos) => {
     const seen: string[] = [];
-    const f = make(UA.igIos, { fallback: 'retry', continueUrl: DEST, onContinue: (u: string, r: string) => seen.push(r), ...o });
+    const f = make(ua, { continueUrl: DEST, onContinue: (_u: string, r: string) => seen.push(r), ...o });
     return { ...f, seen };
 };
-test('retry: navigates at once, then every retryMs (default 400)', () => {
-    const f = retryEnv();
+test('retry: never navigates to the destination before the scheme fired (fb ios fires at 1500)', () => {
+    const f = loop({ fallback: 'retry' }, UA.fbIos);
     f.e.auto();
-    expect(f.win.location.href).toBe(DEST);
+    f.advance(1499);
+    expect(f.seen).toEqual([]);
+    expect(f.win.location.href).toBe('https://example.com/p');
+    f.advance(1);
+    expect(f.win.location.href).toBe(XS_T); // scheme first
+    expect(f.seen).toEqual([]);
+});
+test('retry: first retry at fire + retryMs (default 300), then every retryMs', () => {
+    const f = loop({ fallback: 'retry' });
+    f.e.auto();
+    expect(f.win.location.href).toBe(IG_T);
+    f.advance(299);
+    expect(f.seen).toEqual([]);
+    f.advance(1);
     expect(f.seen).toEqual(['retry']);
     f.win.location.href = 'dropped';
-    f.advance(399);
-    expect(f.win.location.href).toBe('dropped');
-    f.advance(1);
+    f.advance(300);
     expect(f.win.location.href).toBe(DEST);
     expect(f.seen).toEqual(['retry', 'retry']);
 });
 test('retry: custom retryMs; stops on pagehide', () => {
-    const f = retryEnv({ retryMs: 100 });
+    const f = loop({ fallback: 'retry', retryMs: 100 });
     f.e.auto();
-    f.advance(250);
+    f.advance(350);
     expect(f.seen.length).toBe(3);
     f.emit('pagehide');
     f.advance(5000);
     expect(f.seen.length).toBe(3);
 });
 test('retry: stops on beforeunload', () => {
-    const f = retryEnv();
+    const f = loop({ fallback: 'retry' });
     f.e.auto();
+    f.advance(300);
     f.emit('beforeunload');
     f.advance(5000);
     expect(f.seen.length).toBe(1);
 });
 test('retry: stops after 15 s', () => {
-    const f = retryEnv();
+    const f = loop({ fallback: 'retry' });
     f.e.auto();
     f.advance(60000);
     const n = f.seen.length;
-    expect(n).toBeGreaterThan(30);
-    expect(n).toBeLessThanOrEqual(40);
+    expect(n).toBeGreaterThan(40);
+    expect(n).toBeLessThanOrEqual(52);
     f.advance(60000);
     expect(f.seen.length).toBe(n);
 });
-test('onContinue reports the reason for each navigation (parallel, tap)', () => {
-    const seen: string[] = [];
-    const f = make(UA.igIos, { fallback: 'parallel', continueUrl: DEST, onContinue: (_u: string, r: string) => seen.push(r) });
+test('parallel uses the same loop: first at parallelDelayMs, then every retryMs, reason "parallel"', () => {
+    const f = loop({ fallback: 'parallel', parallelDelayMs: 1000, retryMs: 500 });
     f.e.auto();
-    f.advance(0);
-    f.emit('focus');
-    f.advance(4000);
+    f.advance(999);
+    expect(f.seen).toEqual([]);
+    f.advance(1);
+    expect(f.seen).toEqual(['parallel']);
+    f.advance(1000);
+    expect(f.seen).toEqual(['parallel', 'parallel', 'parallel']);
+    f.emit('pagehide');
+    f.advance(5000);
+    expect(f.seen.length).toBe(3);
+});
+test('onContinue reports "tap" for the explicit Continue', () => {
+    const f = loop({});
+    f.e.auto();
     f.e.continue();
-    expect(seen).toEqual(['parallel', 'focus', 'safety', 'tap']);
+    expect(f.seen).toEqual(['tap']);
 });
