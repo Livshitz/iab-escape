@@ -277,9 +277,8 @@ test('parallel: navigates to the destination right after the scheme (delay 0), o
     expect(f.win.location.href).toBe(DEST);
     expect(f.count()).toBe(1);
     f.win.location.href = 'reset';
-    leaveAndReturn(f);
-    f.advance(10000);
-    expect(f.win.location.href).toBe('reset');
+    leaveAndReturn(f); // user is back: the navigation is re-issued, the scheme is NOT re-fired
+    expect(f.win.location.href).toBe(DEST);
     expect(f.count()).toBe(1);
     expect(f.overlay()!.find('ie-msg')!.textContent).toBe('Opening…');
 });
@@ -298,4 +297,91 @@ test('parallel: no destination -> no navigation (loader stays in fallback)', () 
     e.auto();
     w.advance(5000);
     expect(w.win.location.href).toBe('instagram://extbrowser/?url=https%3A%2F%2Fexample.com%2Fp%3Fiab_escaped%3D1');
+});
+
+// --- parallel / auto: event-driven re-navigation ---
+const parallel = (o: any = {}) => {
+    const f = make(UA.igIos, { fallback: 'parallel', continueUrl: DEST, ...o });
+    f.e.auto();
+    f.advance(0);
+    expect(f.win.location.href).toBe(DEST);
+    f.win.location.href = 'dropped'; // the app's prompt swallowed the navigation
+    return f;
+};
+for (const [name, trigger] of [
+    ['focus', (f: any) => f.emit('focus')],
+    ['visibilitychange -> visible', (f: any) => f.emit('visibilitychange')],
+    ['pageshow', (f: any) => f.emit('pageshow', { persisted: false })],
+    ['pointerdown', (f: any) => f.emit('pointerdown')],
+    ['touchstart', (f: any) => f.emit('touchstart')],
+] as const) {
+    test(`parallel: dropped first navigation is retried on ${name}`, () => {
+        const f = parallel();
+        trigger(f);
+        expect(f.win.location.href).toBe(DEST);
+    });
+}
+test('parallel: no retry before the first (delayed) navigation', () => {
+    const f = make(UA.igIos, { fallback: 'parallel', parallelDelayMs: 1000, continueUrl: DEST });
+    f.e.auto();
+    f.emit('focus');
+    f.emit('pointerdown');
+    expect(f.win.location.href).toBe(IG_T);
+    f.advance(1000);
+    expect(f.win.location.href).toBe(DEST);
+});
+test('parallel: no retry after pagehide', () => {
+    const f = parallel();
+    f.emit('pagehide');
+    f.emit('focus');
+    f.advance(10000);
+    expect(f.win.location.href).toBe('dropped');
+});
+test('parallel: no retry while a navigation is in flight (beforeunload)', () => {
+    const f = parallel();
+    f.emit('beforeunload');
+    f.emit('focus');
+    f.advance(10000);
+    expect(f.win.location.href).toBe('dropped');
+});
+test('parallel: events within 300 ms are one burst; a later one retries again', () => {
+    const f = parallel();
+    f.emit('focus');
+    expect(f.win.location.href).toBe(DEST);
+    f.win.location.href = 'dropped2';
+    f.advance(100);
+    f.emit('pointerdown');
+    expect(f.win.location.href).toBe('dropped2');
+    f.advance(200);
+    f.emit('touchstart');
+    expect(f.win.location.href).toBe(DEST);
+});
+test('parallel: one safety retry at 4 s after the fire, only once', () => {
+    const f = parallel();
+    f.advance(3999);
+    expect(f.win.location.href).toBe('dropped');
+    f.advance(1);
+    expect(f.win.location.href).toBe(DEST);
+    f.win.location.href = 'dropped2';
+    f.advance(30000);
+    expect(f.win.location.href).toBe('dropped2');
+});
+test('auto: focus/pointer event navigates early when focused; not when unfocused or the page left', () => {
+    const a = make(UA.igIos, { fallback: 'auto', continueUrl: DEST });
+    a.e.auto();
+    a.doc.focused = false;
+    a.emit('pointerdown');
+    expect(a.win.location.href).toBe(IG_T);
+    a.doc.focused = true;
+    a.emit('focus');
+    expect(a.win.location.href).toBe(DEST);
+    a.win.location.href = 'dropped';
+    a.advance(400);
+    a.emit('focus');
+    expect(a.win.location.href).toBe(DEST); // re-issued after a dropped navigation
+    const b = make(UA.igIos, { fallback: 'auto', continueUrl: DEST });
+    b.e.auto();
+    b.emit('pagehide');
+    b.emit('focus');
+    expect(b.win.location.href).toBe(IG_T);
 });

@@ -81,6 +81,8 @@ const WATCH_MS = 3000;
 const REVEAL_MS = 800;
 const REENTER_LOCK_MS = 1000;
 const AUTO_RECHECK_MS = 150;
+const DEBOUNCE_MS = 300;
+const SAFETY_MS = 4000;
 const FIRED = '__iabEscapeFired';
 
 const hasParam = (url: string, key: string) =>
@@ -98,7 +100,8 @@ export class IabEscape {
     private wentAway = false;
     private locked = false;
     private dismissed = false;
-    private fallbackSeq = 0;
+    private continuing = false;
+    private contArmed = false;
     private base = '';
 
     public constructor(public options?: Partial<IabEscapeOptions>) {
@@ -212,10 +215,17 @@ export class IabEscape {
     public continue(): void {
         const to = this.continueTarget();
         if (!to) return this.dismiss();
-        // The overlay stays until the page unloads: no bare host page between the prompt and the destination.
-        this.dismissed = true;
-        if (this.o.ui) this.loader().continuing();
-        this.state('continuing');
+        this.go(to);
+    }
+
+    /** Navigates the webview. The overlay stays until the page unloads: no bare host page in between. */
+    private go(to: string): void {
+        if (!this.continuing) {
+            this.continuing = true;
+            this.dismissed = true; // stops scheme re-fires
+            if (this.o.ui) this.loader().continuing();
+            this.state('continuing');
+        }
         this.win.location.href = to;
     }
 
@@ -229,17 +239,45 @@ export class IabEscape {
     }
 
     /**
-     * 'auto' fallback: if the page is still here after the fire, continue in the webview. A native confirm may leave
-     * the page 'visible' with timers running, so only continue when it is visible AND focused; else re-check.
+     * Continue in the webview after the scheme fired ('parallel': at once / after parallelDelayMs; 'auto': once the
+     * page is visible AND focused). A location.href issued while the app's native prompt is open is dropped, so the
+     * navigation is re-issued when the user is back on the page (focus, visible, pageshow, pointer/touch; debounced),
+     * plus one safety retry at SAFETY_MS ('parallel'). All retries stop on pagehide; none while a beforeunload
+     * says a navigation is in flight. 'auto' also polls every AUTO_RECHECK_MS as a backstop.
      */
-    private armAutoFallback(): void {
+    private armContinue(mode: 'parallel' | 'auto'): void {
+        const to = this.continueTarget();
+        if (this.contArmed || !to) return;
+        this.contArmed = true;
         const { win } = this;
         const doc = win.document;
-        const seq = ++this.fallbackSeq;
+        const focused = () => doc.visibilityState === 'visible' && (doc.hasFocus?.() ?? true);
+        let started = false, gone = false, flight = false, quiet = false;
+        const stopped = () => gone || flight || (this.dismissed && !this.continuing);
+        const go = () => { started = true; this.go(to); };
+        const retry = () => {
+            if (stopped() || quiet || (mode === 'parallel' && !started)) return;
+            if (mode === 'auto' && (this.wentAway || !focused())) return;
+            quiet = true;
+            win.setTimeout(() => { quiet = false; }, DEBOUNCE_MS);
+            go();
+        };
+        win.addEventListener('focus', retry);
+        win.addEventListener('pageshow', retry);
+        doc.addEventListener('visibilitychange', () => { if (doc.visibilityState === 'visible') retry(); });
+        doc.addEventListener('pointerdown', retry, true);
+        doc.addEventListener('touchstart', retry, true);
+        win.addEventListener('pagehide', () => { gone = true; });
+        win.addEventListener('beforeunload', () => { flight = true; });
+        if (mode === 'parallel') {
+            win.setTimeout(() => { if (!stopped()) go(); }, this.o.parallelDelayMs);
+            win.setTimeout(() => { if (started && !stopped()) go(); }, SAFETY_MS);
+            return;
+        }
         let waited = this.o.fallbackMs;
         const check = () => {
-            if (seq !== this.fallbackSeq || this.dismissed || this.wentAway) return;
-            if (doc.visibilityState === 'visible' && (doc.hasFocus?.() ?? true)) return this.continue();
+            if (stopped() || started || this.wentAway) return;
+            if (focused()) return go();
             waited += AUTO_RECHECK_MS;
             if (waited <= this.o.fallbackMaxMs) win.setTimeout(check, AUTO_RECHECK_MS);
         };
@@ -260,8 +298,7 @@ export class IabEscape {
         this.fires++;
         this.watchReentry();
         this.win.setTimeout(() => { if (!this.dismissed) this.fallback(); }, REVEAL_MS);
-        if (this.o.fallback === 'auto') this.armAutoFallback();
-        if (this.o.fallback === 'parallel' && this.continueTarget()) this.win.setTimeout(() => this.continue(), this.o.parallelDelayMs);
+        if (this.o.fallback === 'auto' || this.o.fallback === 'parallel') this.armContinue(this.o.fallback);
         return true;
     }
 

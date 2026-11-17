@@ -114,8 +114,8 @@ myUi.onContinue(() => esc.dismiss());
 
 `fallback` (`data-fallback`), default `'manual'`:
 
-- `'auto'`: continues by itself when the page is still here `fallbackMs` (default 2500) after the fire. A native confirm may leave the page visible with timers running, so it only continues when `document.visibilityState` is `visible` and `document.hasFocus()` is true, re-checking every 150 ms up to `fallbackMaxMs` (15000). Device-unverified.
-- `'parallel'`: fires the scheme and navigates to the destination `parallelDelayMs` (`data-parallel-delay-ms`, default 0) later, whatever the confirm answer. Risk: navigating may dismiss the app's confirm dialog before the user answers. Device-unverified.
+- `'parallel'` (**recommended**): fires the scheme and navigates to the destination `parallelDelayMs` (`data-parallel-delay-ms`, default 0) later. A navigation issued while the app's native prompt is open can be dropped (seen on Facebook iOS), so it is re-issued when the user is back on the page: on `focus`, `visibilitychange` to visible, `pageshow`, or any `pointerdown`/`touchstart` (one per ~300 ms burst), plus one safety retry 4 s after the fire. Retries stop on `pagehide` and while a `beforeunload` says a navigation is in flight.
+- `'auto'`: continues once the page is visible AND focused (`document.hasFocus()`), triggered by the same events and by a 150 ms poll starting `fallbackMs` (default 2500) after the fire, up to `fallbackMaxMs` (15000).
 
 No re-fire happens after either navigates.
 
