@@ -1,5 +1,5 @@
-export interface Labels { opening: string; open: string; stay: string }
-export const DEFAULT_LABELS: Labels = { opening: 'Opening in your browser…', open: 'Open in browser', stay: 'Continue here' };
+export interface Labels { opening: string; open: string; stay: string; continuing: string }
+export const DEFAULT_LABELS: Labels = { opening: 'Opening in your browser…', open: 'Open in browser', stay: 'Continue here', continuing: 'Opening…' };
 
 /** Styling API: the `#iab-escape` root, the classes below, and these CSS variables (all optional). */
 export interface Theme { bg?: string; fg?: string; accent?: string; accentFg?: string; radius?: string; font?: string }
@@ -25,6 +25,7 @@ export class Loader {
     private open!: HTMLAnchorElement;
     private stay!: HTMLAnchorElement;
     private spin!: HTMLElement;
+    private msg!: HTMLElement;
 
     public constructor(private doc: Document, private labels: Labels, private theme: Theme = {}, private onStay?: () => void) {}
 
@@ -44,6 +45,15 @@ export class Loader {
         this.open.href = href;
         this.open.hidden = false;
         this.stay.hidden = false;
+    }
+
+    /** A continue navigation is under way: keep the overlay (no bare page in between), spinner + short text. */
+    public continuing(): void {
+        if (!this.root) this.build();
+        this.spin.hidden = false;
+        this.open.hidden = true;
+        this.stay.hidden = true;
+        this.msg.textContent = this.labels.continuing;
     }
 
     public hide(): void {
@@ -67,7 +77,7 @@ export class Loader {
         const style = this.doc.createElement('style');
         style.textContent = CSS;
         this.spin = this.el('div', 'ie-spin');
-        const msg = this.el('div', 'ie-msg', this.labels.opening);
+        const msg = (this.msg = this.el('div', 'ie-msg', this.labels.opening));
         this.open = this.el('a', 'ie-open', this.labels.open);
         this.stay = this.el('a', 'ie-stay', this.labels.stay);
         this.stay.href = '#';

@@ -59,15 +59,18 @@ test('loader: after the fire the button appears with the scheme URL; labels over
     expect(btn.textContent).toBe('Go');
     expect(f.overlay()!.find('ie-stay')!.hidden).toBe(false);
 });
-test('loader: "Continue here" removes the overlay and stops re-fires', () => {
+test('loader: "Continue here" keeps the overlay (continuing text), stops re-fires', () => {
     const f = make(UA.igIos);
     f.e.auto();
     f.advance(800);
     f.overlay()!.find('ie-stay')!.click();
-    expect(f.overlay()).toBeNull();
+    const o = f.overlay()!;
+    expect(o).not.toBeNull();
+    expect(o.find('ie-msg')!.textContent).toBe('Opening…');
+    expect(o.find('ie-open')!.hidden).toBe(true);
+    expect(o.find('ie-stay')!.hidden).toBe(true);
     leaveAndReturn(f);
     expect(f.count()).toBe(1);
-    expect(f.overlay()).toBeNull();
 });
 
 test('re-entry: left then visible fires once more and shows the loader again', () => {
@@ -164,7 +167,7 @@ test('continue: navigates the webview to continueUrl; "Continue here" button doe
     f.e.auto();
     f.advance(800);
     f.overlay()!.find('ie-stay')!.click();
-    expect(f.overlay()).toBeNull();
+    expect(f.overlay()).not.toBeNull(); // kept until the page unloads
     expect(f.win.location.href).toBe(DEST);
 });
 test('continue: defaults to the target url; relative continueUrl resolves', () => {
@@ -238,4 +241,61 @@ test('fallback auto: does not navigate if the page went hidden/pagehide', () => 
     g.emit('pagehide');
     g.advance(10000);
     expect(g.win.location.href).toBe(IG_T);
+});
+
+test('auto fallback polls every 150 ms while unfocused', () => {
+    const f = make(UA.igIos, { fallback: 'auto', continueUrl: DEST });
+    f.e.auto();
+    f.doc.focused = false;
+    f.advance(2500);
+    f.doc.focused = true;
+    f.advance(149);
+    expect(f.win.location.href).toBe(IG_T);
+    f.advance(1);
+    expect(f.win.location.href).toBe(DEST);
+});
+test('auto fallback keeps the overlay while navigating (no bare page)', () => {
+    const f = make(UA.igIos, { fallback: 'auto', continueUrl: DEST });
+    f.e.auto();
+    f.advance(2500);
+    expect(f.win.location.href).toBe(DEST);
+    expect(f.overlay()!.find('ie-msg')!.textContent).toBe('Opening…');
+});
+test('custom continuing label; onState gets continuing', () => {
+    const phases: string[] = [];
+    const f = make(UA.igIos, { continueUrl: DEST, labels: { continuing: 'Hold on' }, onState: (s: any) => phases.push(s.phase) });
+    f.e.auto();
+    f.e.continue();
+    expect(f.overlay()!.find('ie-msg')!.textContent).toBe('Hold on');
+    expect(phases.at(-1)).toBe('continuing');
+});
+test('parallel: navigates to the destination right after the scheme (delay 0), once, no re-fire', () => {
+    const f = make(UA.igIos, { fallback: 'parallel', continueUrl: DEST });
+    f.e.auto();
+    expect(f.win.location.href).toBe(IG_T);
+    f.advance(0);
+    expect(f.win.location.href).toBe(DEST);
+    expect(f.count()).toBe(1);
+    f.win.location.href = 'reset';
+    leaveAndReturn(f);
+    f.advance(10000);
+    expect(f.win.location.href).toBe('reset');
+    expect(f.count()).toBe(1);
+    expect(f.overlay()!.find('ie-msg')!.textContent).toBe('Opening…');
+});
+test('parallel: parallelDelayMs delays the destination navigation; ignores focus/visibility', () => {
+    const f = make(UA.igIos, { fallback: 'parallel', parallelDelayMs: 1000, continueUrl: DEST });
+    f.e.auto();
+    f.doc.focused = false;
+    f.advance(999);
+    expect(f.win.location.href).toBe(IG_T);
+    f.advance(1);
+    expect(f.win.location.href).toBe(DEST);
+});
+test('parallel: no destination -> no navigation (loader stays in fallback)', () => {
+    const w = fakeWindow(UA.igIos, 'https://example.com/p');
+    const e = new IabEscape({ window: w.win, fallback: 'parallel' });
+    e.auto();
+    w.advance(5000);
+    expect(w.win.location.href).toBe('instagram://extbrowser/?url=https%3A%2F%2Fexample.com%2Fp%3Fiab_escaped%3D1');
 });

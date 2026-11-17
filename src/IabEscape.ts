@@ -6,7 +6,7 @@ declare const __VERSION__: string | undefined;
 declare const __BUILD_TIME__: string | undefined;
 
 export type { Env, Labels, Rule, Theme };
-export interface State { phase: 'opening' | 'fallback' | 'dismissed' | 'reentry'; url: string | null }
+export interface State { phase: 'opening' | 'fallback' | 'continuing' | 'dismissed' | 'reentry'; url: string | null }
 export interface AttemptInfo { rule: Rule; url: string }
 export interface ResultInfo extends AttemptInfo {
     /** 'stayed-or-unknown' is NOT proof of failure: Meta webviews do not fire visibilitychange/pagehide reliably. */
@@ -35,9 +35,11 @@ export class IabEscapeOptions {
     /** Where "Continue here" (and the auto fallback) navigates the webview. Default: `url`; none -> just dismiss. */
     continueUrl: string | null = null;
     /** 'auto': if the page did not go away after the fire, continue in the webview by itself. Device-unverified. */
-    fallback: 'manual' | 'auto' = 'manual';
+    fallback: 'manual' | 'auto' | 'parallel' = 'manual';
     /** 'auto' only: wait this long after the fire before the first check. */
     fallbackMs = 2500;
+    /** 'parallel' only: navigate to the destination this long after the scheme fires, whatever the confirm answer. */
+    parallelDelayMs = 0;
     /** 'auto' only: stop re-checking (every 500 ms while the page is unfocused or hidden) this long after the fire. */
     fallbackMaxMs = 15000;
     /** Max automatic fires per page lifetime (the first fire + re-entry re-fires). */
@@ -55,7 +57,9 @@ export function optionsFromDataset(d: Record<string, string | undefined>): Parti
     if (d.includeUnproven !== undefined) o.includeUnproven = true;
     if (d.url) o.url = d.url;
     if (d.continueUrl) o.continueUrl = d.continueUrl;
-    if (d.fallback === 'auto' || d.fallback === 'manual') o.fallback = d.fallback;
+    if (d.fallback === 'auto' || d.fallback === 'manual' || d.fallback === 'parallel') o.fallback = d.fallback;
+    const pd = d.parallelDelayMs?.trim();
+    if (pd && Number.isFinite(Number(pd)) && Number(pd) >= 0) o.parallelDelayMs = Number(pd);
     const fm = d.fallbackMs?.trim();
     if (fm && Number.isFinite(Number(fm)) && Number(fm) >= 0) o.fallbackMs = Number(fm);
     if (d.ui !== undefined) o.ui = d.ui !== 'false';
@@ -68,6 +72,7 @@ export function optionsFromDataset(d: Record<string, string | undefined>): Parti
     if (d.labelOpening) labels.opening = d.labelOpening;
     if (d.labelOpen) labels.open = d.labelOpen;
     if (d.labelStay) labels.stay = d.labelStay;
+    if (d.labelContinuing) labels.continuing = d.labelContinuing;
     if (Object.keys(labels).length) o.labels = labels;
     return o;
 }
@@ -75,7 +80,7 @@ export function optionsFromDataset(d: Record<string, string | undefined>): Parti
 const WATCH_MS = 3000;
 const REVEAL_MS = 800;
 const REENTER_LOCK_MS = 1000;
-const AUTO_RECHECK_MS = 500;
+const AUTO_RECHECK_MS = 150;
 const FIRED = '__iabEscapeFired';
 
 const hasParam = (url: string, key: string) =>
@@ -203,11 +208,15 @@ export class IabEscape {
         this.state('dismissed');
     }
 
-    /** "Continue here": dismiss, then navigate the current webview to the destination (if there is one). */
+    /** "Continue here": navigate the current webview to the destination, keeping the loader (no destination: just dismiss). */
     public continue(): void {
-        this.dismiss();
         const to = this.continueTarget();
-        if (to) this.win.location.href = to;
+        if (!to) return this.dismiss();
+        // The overlay stays until the page unloads: no bare host page between the prompt and the destination.
+        this.dismissed = true;
+        if (this.o.ui) this.loader().continuing();
+        this.state('continuing');
+        this.win.location.href = to;
     }
 
     private continueTarget(): string | null {
@@ -252,6 +261,7 @@ export class IabEscape {
         this.watchReentry();
         this.win.setTimeout(() => { if (!this.dismissed) this.fallback(); }, REVEAL_MS);
         if (this.o.fallback === 'auto') this.armAutoFallback();
+        if (this.o.fallback === 'parallel' && this.continueTarget()) this.win.setTimeout(() => this.continue(), this.o.parallelDelayMs);
         return true;
     }
 

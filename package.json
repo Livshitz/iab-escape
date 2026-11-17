@@ -1,6 +1,6 @@
 {
   "name": "@livx.cc/iab-escape",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "description": "Move users from the Facebook / Instagram in-app browser to the device default browser, using only trigger methods proven on real devices.",
   "license": "MIT",

@@ -47,3 +47,8 @@ test('optionsFromDataset: continue url and fallback', () => {
     expect(optionsFromDataset({ continueUrl: 'https://a.io/x', fallback: 'auto', fallbackMs: '3000' })).toEqual({ continueUrl: 'https://a.io/x', fallback: 'auto', fallbackMs: 3000 });
     expect(optionsFromDataset({ fallback: 'bogus', fallbackMs: 'x' })).toEqual({});
 });
+
+test('optionsFromDataset: parallel fallback, delay and continuing label', () => {
+    expect(optionsFromDataset({ fallback: 'parallel', parallelDelayMs: '1000', labelContinuing: 'Go' })).toEqual({ fallback: 'parallel', parallelDelayMs: 1000, labels: { continuing: 'Go' } });
+    expect(optionsFromDataset({ parallelDelayMs: '-1' })).toEqual({});
+});

@@ -110,9 +110,14 @@ myUi.onContinue(() => esc.dismiss());
 
 ## Declined the prompt
 
-"Continue here" navigates the webview to the destination (`continueUrl` / `data-continue-url`, default: the `url` / `data-url` target; with no url it only removes the overlay). A custom UI calls `esc.continue()`.
+"Continue here" navigates the webview to the destination (`continueUrl` / `data-continue-url`, default: the `url` / `data-url` target; with no url it only removes the overlay). The loader is kept (text `labels.continuing`, "Opening…") until the page unloads, so no bare host page shows in between. A custom UI calls `esc.continue()`.
 
-`fallback: 'auto'` (`data-fallback="auto"`, default `'manual'`) continues by itself when the page is still here `fallbackMs` (default 2500) after the fire. A native confirm may leave the page visible with timers running, so it only continues when `document.visibilityState` is `visible` and `document.hasFocus()` is true, re-checking every 500 ms up to `fallbackMaxMs` (15000). This focus check is device-unverified. No re-fire happens after it navigates.
+`fallback` (`data-fallback`), default `'manual'`:
+
+- `'auto'`: continues by itself when the page is still here `fallbackMs` (default 2500) after the fire. A native confirm may leave the page visible with timers running, so it only continues when `document.visibilityState` is `visible` and `document.hasFocus()` is true, re-checking every 150 ms up to `fallbackMaxMs` (15000). Device-unverified.
+- `'parallel'`: fires the scheme and navigates to the destination `parallelDelayMs` (`data-parallel-delay-ms`, default 0) later, whatever the confirm answer. Risk: navigating may dismiss the app's confirm dialog before the user answers. Device-unverified.
+
+No re-fire happens after either navigates.
 
 ## Limits
 
