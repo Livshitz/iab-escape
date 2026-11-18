@@ -114,7 +114,7 @@ myUi.onContinue(() => esc.dismiss());
 
 `fallback` (`data-fallback`), default `'manual'`:
 
-- `'parallel'` (**recommended**): after the scheme fires, navigates to the destination `parallelDelayMs` (`data-parallel-delay-ms`, default 0) later and keeps re-issuing it every `retryMs` (`data-retry-ms`, default 300) until `pagehide`, `beforeunload` or 15 s. The app's native prompt swallows navigations while it is open and no browser event reports it closing (seen on Facebook iOS), so the loop simply keeps trying. It never navigates before the scheme has fired.
+- `'parallel'` (**recommended**): after the scheme fires, navigates to the destination `parallelDelayMs` (`data-parallel-delay-ms`, default 0) later and keeps re-issuing it every `retryMs` (`data-retry-ms`, default 300) until `pagehide` or `beforeunload`: every `retryMs` for 15 s, then every 1 s up to 10 min, so a user who comes back from the browser late (no event on Facebook iOS) still reaches the destination. The app's native prompt swallows navigations while it is open and no browser event reports it closing (seen on Facebook iOS), so the loop simply keeps trying. It never navigates before the scheme has fired.
 - `'auto'`: continues once the page is visible AND focused (`document.hasFocus()`), triggered by `focus`/`visibilitychange`/`pageshow`/`pointerdown`/`touchstart` events and by a 150 ms poll starting `fallbackMs` (default 2500) after the fire, up to `fallbackMaxMs` (15000).
 
 - `'retry'`: the same loop with the first navigation at fire + `retryMs`.

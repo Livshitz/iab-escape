@@ -364,13 +364,18 @@ test('retry: stops on beforeunload', () => {
     f.advance(5000);
     expect(f.seen.length).toBe(1);
 });
-test('retry: stops after 15 s', () => {
+test('retry: fast for 15 s, then 1 s (user back after a long stay), stops at 10 min', () => {
     const f = loop({ fallback: 'retry' });
     f.e.auto();
-    f.advance(60000);
+    f.advance(15000);
+    const fast = f.seen.length;
+    expect(fast).toBeGreaterThan(40);
+    expect(fast).toBeLessThanOrEqual(52);
+    f.advance(45000);
+    expect(f.seen.length - fast).toBeGreaterThanOrEqual(44);
+    expect(f.seen.length - fast).toBeLessThanOrEqual(46);
+    f.advance(600000);
     const n = f.seen.length;
-    expect(n).toBeGreaterThan(40);
-    expect(n).toBeLessThanOrEqual(52);
     f.advance(60000);
     expect(f.seen.length).toBe(n);
 });

@@ -42,7 +42,7 @@ export class IabEscapeOptions {
     fallbackMs = 2500;
     /** 'parallel' only: navigate to the destination this long after the scheme fires, whatever the confirm answer. */
     parallelDelayMs = 0;
-    /** 'retry' (experimental): re-issue the destination navigation this often, until unload or 15 s. */
+    /** 'retry' (experimental): re-issue the destination navigation this often, until unload; every retryMs for 15 s, then every 1 s up to 10 min. */
     retryMs = 300;
     /** Called for every navigation to the destination the lib issues (diagnostics). */
     onContinue: ((url: string, reason: string) => void) | null = null;
@@ -91,6 +91,9 @@ const REENTER_LOCK_MS = 1000;
 const AUTO_RECHECK_MS = 150;
 const DEBOUNCE_MS = 300;
 const RETRY_MAX_MS = 15000;
+/** After RETRY_MAX_MS keep a slow retry: a user who stays long in the browser comes back to a live loop (FB iOS sends no event on return). */
+const RETRY_SLOW_MS = 1000;
+const RETRY_SLOW_MAX_MS = 600000;
 const FIRED = '__iabEscapeFired';
 
 const hasParam = (url: string, key: string) =>
@@ -249,7 +252,7 @@ export class IabEscape {
 
     /**
      * Continue in the webview AFTER the scheme fired (armed from fireNow only). 'retry'/'parallel': a loop re-issuing
-     * the navigation every retryMs (first at fire + retryMs / parallelDelayMs) until pagehide, beforeunload or 15 s;
+     * the navigation every retryMs (first at fire + retryMs / parallelDelayMs) until pagehide or beforeunload (fast for 15 s, then 1 s up to 10 min);
      * the app's native prompt swallows navigations while open and no browser event reports it closing. 'auto': once
      * the page is visible AND focused (events + a 150 ms poll starting at fallbackMs).
      */
@@ -277,10 +280,11 @@ export class IabEscape {
             // app's prompt swallows navigations while open (no browser event reports it closing), so just keep trying.
             let elapsed = first;
             const tick = () => {
-                if (stopped() || elapsed > RETRY_MAX_MS) return;
+                if (stopped() || elapsed > RETRY_SLOW_MAX_MS) return;
                 go(mode);
-                elapsed += this.o.retryMs;
-                win.setTimeout(tick, this.o.retryMs);
+                const step = elapsed < RETRY_MAX_MS ? this.o.retryMs : RETRY_SLOW_MS;
+                elapsed += step;
+                win.setTimeout(tick, step);
             };
             win.setTimeout(tick, first);
             return;
