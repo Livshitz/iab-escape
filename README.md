@@ -117,7 +117,8 @@ myUi.onContinue(() => esc.dismiss());
 - `'parallel'` (**recommended**): after the scheme fires, navigates to the destination `parallelDelayMs` (`data-parallel-delay-ms`, default 0) later and keeps re-issuing it every `retryMs` (`data-retry-ms`, default 300) until `pagehide`, `beforeunload` or 15 s. The app's native prompt swallows navigations while it is open and no browser event reports it closing (seen on Facebook iOS), so the loop simply keeps trying. It never navigates before the scheme has fired.
 - `'auto'`: continues once the page is visible AND focused (`document.hasFocus()`), triggered by `focus`/`visibilitychange`/`pageshow`/`pointerdown`/`touchstart` events and by a 150 ms poll starting `fallbackMs` (default 2500) after the fire, up to `fallbackMaxMs` (15000).
 
-- `'retry'`: the same loop with the first navigation at fire + `retryMs`. `onContinue(url, reason)` reports every navigation the lib issues (diagnostics).
+- `'retry'`: the same loop with the first navigation at fire + `retryMs`.
+- Instagram iOS: the loop starts no earlier than 2 s after the fire (rule `continueDelayMs`; option `continueDelayMs` overrides). Its open-app prompt gives the page no signal (no blur/focus/visibility, timers keep running), so an earlier navigation loads the destination behind the prompt. `onContinue(url, reason)` reports every navigation the lib issues (diagnostics).
 
 No re-fire happens after either navigates.
 

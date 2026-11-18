@@ -270,7 +270,7 @@ test('custom continuing label; onState gets continuing', () => {
     expect(phases.at(-1)).toBe('continuing');
 });
 test('parallel: navigates to the destination right after the scheme (delay 0), once re-fire-free', () => {
-    const f = make(UA.igIos, { fallback: 'parallel', continueUrl: DEST });
+    const f = make(UA.igIos, { fallback: 'parallel', continueDelayMs: 0, continueUrl: DEST });
     f.e.auto();
     expect(f.win.location.href).toBe(IG_T); // scheme first, destination only after
     f.advance(0);
@@ -282,7 +282,7 @@ test('parallel: navigates to the destination right after the scheme (delay 0), o
     expect(f.overlay()!.find('ie-msg')!.textContent).toBe('Opening…');
 });
 test('parallel: parallelDelayMs delays the destination navigation; ignores focus/visibility', () => {
-    const f = make(UA.igIos, { fallback: 'parallel', parallelDelayMs: 1000, continueUrl: DEST });
+    const f = make(UA.igIos, { fallback: 'parallel', parallelDelayMs: 1000, continueDelayMs: 0, continueUrl: DEST });
     f.e.auto();
     f.doc.focused = false;
     f.advance(999);
@@ -321,7 +321,7 @@ test('auto: focus/pointer event navigates early when focused; not when unfocused
 // --- retry loop ('retry' and 'parallel' share it) ---
 const loop = (o: any = {}, ua = UA.igIos) => {
     const seen: string[] = [];
-    const f = make(ua, { continueUrl: DEST, onContinue: (_u: string, r: string) => seen.push(r), ...o });
+    const f = make(ua, { continueUrl: DEST, continueDelayMs: 0, onContinue: (_u: string, r: string) => seen.push(r), ...o });
     return { ...f, seen };
 };
 test('retry: never navigates to the destination before the scheme fired (fb ios fires at 1500)', () => {
@@ -392,4 +392,21 @@ test('onContinue reports "tap" for the explicit Continue', () => {
     f.e.auto();
     f.e.continue();
     expect(f.seen).toEqual(['tap']);
+});
+
+test('retry: IG iOS waits continueDelayMs (2000) before the first retry — its open-app prompt gives no signal', () => {
+    const f = loop({ fallback: 'retry', continueDelayMs: null });
+    f.e.auto();
+    f.advance(1999);
+    expect(f.seen).toEqual([]);
+    f.advance(1);
+    expect(f.seen).toEqual(['retry']);
+    f.advance(300);
+    expect(f.seen).toEqual(['retry', 'retry']);
+});
+test('retry: FB Android has no continueDelayMs (first retry at retryMs)', () => {
+    const f = loop({ fallback: 'retry', continueDelayMs: null }, UA.fbAndroid);
+    f.e.auto();
+    f.advance(300);
+    expect(f.seen).toEqual(['retry']);
 });

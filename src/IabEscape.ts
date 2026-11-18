@@ -20,6 +20,8 @@ export class IabEscapeOptions {
     userAgent: string | null = null;
     /** Overrides the per-rule delay used by auto(). */
     delayMs: number | null = null;
+    /** Override the rule's continueDelayMs (min wait before retry/parallel continues). null = use the rule. */
+    continueDelayMs: number | null = null;
     includeUnproven = false;
     /** Query param appended as `=1` to the target so the landing page can tell. null disables. */
     markParam: string | null = 'iab_escaped';
@@ -255,7 +257,7 @@ export class IabEscape {
         const to = this.continueTarget();
         if (this.contArmed || !to) return;
         this.contArmed = true;
-        const first = mode === 'parallel' ? this.o.parallelDelayMs : this.o.retryMs;
+        const first = Math.max(mode === 'parallel' ? this.o.parallelDelayMs : this.o.retryMs, this.o.continueDelayMs ?? this.getRule()?.continueDelayMs ?? 0);
         const { win } = this;
         const doc = win.document;
         const focused = () => doc.visibilityState === 'visible' && (doc.hasFocus?.() ?? true);
