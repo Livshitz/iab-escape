@@ -23,8 +23,8 @@ export class IabEscapeOptions {
     /** Override the rule's continueDelayMs (min wait before retry/parallel continues). null = use the rule. */
     continueDelayMs: number | null = null;
     includeUnproven = false;
-    /** Query param appended as `=1` to the target so the landing page can tell. null disables. */
-    markParam: string | null = 'iab_escaped';
+    /** Query param appended to the target as `=<app>` (facebook | instagram) so the landing page can tell and filter by source. null disables. */
+    markParam: string | null = 'escaped';
     onAttempt: ((info: AttemptInfo) => void) | null = null;
     onResult: ((info: ResultInfo) => void) | null = null;
     /** Built-in full-screen loader (spinner, then an "Open in browser" button) while auto() runs. false = off. */
@@ -154,7 +154,7 @@ export class IabEscape {
         const hash = h < 0 ? '' : raw.slice(h);
         const key = this.o.markParam;
         if (key && !hasParam(noHash, key)) {
-            noHash += (noHash.includes('?') ? (/[?&]$/.test(noHash) ? '' : '&') : '?') + key + '=1';
+            noHash += (noHash.includes('?') ? (/[?&]$/.test(noHash) ? '' : '&') : '?') + key + '=' + encodeURIComponent(this.getRule()?.app ?? '1');
         }
         return { href: noHash + hash, noHash, protocol: resolved.protocol };
     }

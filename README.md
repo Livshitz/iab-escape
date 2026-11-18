@@ -56,7 +56,7 @@ Script-tag attributes map to the JS options.
 | `userAgent` | | `navigator.userAgent` | Override detection input |
 | `delayMs` | `data-delay-ms` | per app | Delay before firing |
 | `includeUnproven` | `data-include-unproven` | `false` | Enable experimental rules |
-| `markParam` | `data-mark-param` | `iab_escaped` | Loop-guard query param; `null` / empty disables |
+| `markParam` | `data-mark-param` | `escaped` | Mark + loop-guard param, set to the source app (`escaped=facebook` / `instagram`) so the landing page can filter by it; `null` / empty disables |
 | `ui` | `data-ui` | `true` | Built-in loader and buttons |
 | `labels` | `data-label-opening`, `-open`, `-stay` | English | UI text |
 | `theme` | `data-accent`, `data-bg`, `data-fg` | built-in | Colors |
@@ -101,7 +101,7 @@ myUi.onContinue(() => esc.dismiss());
 
 - Each app has its own hand-off: Instagram iOS `instagram://extbrowser/?url=<enc>`, Facebook iOS `x-safari-https://host/path` (fired after a 1.5 s delay), Facebook Android `intent://host/path#Intent;scheme=https;end`.
 - If the document is still loading, `auto()` waits for `DOMContentLoaded` (never `load`), because navigating mid-parse leaves a half-loaded page on return. If it is already `interactive`/`complete`, the delay counts from the call.
-- It adds `iab_escaped=1` to the target as a loop guard; the rest of the query stays byte-identical.
+- It adds `escaped=<app>` (e.g. `escaped=facebook`) to the target: a loop guard and a source mark for analytics; the rest of the query stays byte-identical.
 - It never uses meta refresh: that loops on Android when the user cancels.
 
 ## Tested on
@@ -126,7 +126,7 @@ No re-fire happens after either navigates.
 
 - The schemes are undocumented by Meta and an app update can break them: keep a fallback link and monitor.
 - A late `auto()` call (0.8 s after load) was tested 3/3 on Facebook iOS, Instagram iOS and Facebook Android. Only slow or heavy pages remain untested.
-- A bare `?iab_escaped` (no value) counts as "mark present": the URL is left untouched and `auto()` is skipped.
+- A bare `?escaped` (no value) counts as "mark present": the URL is left untouched and `auto()` is skipped.
 - Paid-ad clicks are untested (organic links only).
 - A production domain with universal links may open the native app instead of the browser.
 - Instagram passes no `fbclid` from a DM; Facebook rewrites the `fbclid` at the hand-off.

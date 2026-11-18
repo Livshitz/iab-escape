@@ -3,8 +3,8 @@ import { IabEscape } from '../src/IabEscape';
 import { fakeWindow, UA } from './helpers';
 
 const T = 'https://example.com/p?a=1#frag';
-const IG_T = 'instagram://extbrowser/?url=https%3A%2F%2Fexample.com%2Fp%3Fa%3D1%26iab_escaped%3D1%23frag';
-const XS_T = 'x-safari-https://example.com/p?a=1&iab_escaped=1#frag';
+const IG_T = 'instagram://extbrowser/?url=https%3A%2F%2Fexample.com%2Fp%3Fa%3D1%26escaped%3Dinstagram%23frag';
+const XS_T = 'x-safari-https://example.com/p?a=1&escaped=facebook#frag';
 
 const make = (ua: string, o: any = {}) => {
     const f = fakeWindow(ua, 'https://example.com/p');
@@ -295,7 +295,7 @@ test('parallel: no destination -> no navigation (loader stays in fallback)', () 
     const e = new IabEscape({ window: w.win, fallback: 'parallel' });
     e.auto();
     w.advance(5000);
-    expect(w.win.location.href).toBe('instagram://extbrowser/?url=https%3A%2F%2Fexample.com%2Fp%3Fiab_escaped%3D1');
+    expect(w.win.location.href).toBe('instagram://extbrowser/?url=https%3A%2F%2Fexample.com%2Fp%3Fescaped%3Dinstagram');
 });
 
 test('auto: focus/pointer event navigates early when focused; not when unfocused or the page left', () => {
